@@ -12,7 +12,7 @@ public class JavaTaskApplication {
 
 	public static void main(String[] args) {
 		SpringApplication.run(JavaTaskApplication.class, args);
-		logger.info("Spring application started successfully...!!");
+		logger.info("Spring application started successfully...!!\n");
 	}
 
 }

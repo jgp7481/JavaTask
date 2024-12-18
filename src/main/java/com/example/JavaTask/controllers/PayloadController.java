@@ -19,15 +19,15 @@ public class PayloadController {
     private static Logger logger = LoggerFactory.getLogger(PayloadController.class);
 
     @GetMapping("/healthz")
-    public String isLive(){
-        logger.info("GET request received at /healthz");
-        logger.info("The application is running perfectly..!!");
+    public String isLive(){    // This is for the GET endpoint "/healthz"
+        logger.info("GET request received at /healthz\n");
+        logger.info("The application is running perfectly..!!\n");
         return "OK";
     }
 
     @PostMapping("/log")
-    public Payload logPayload(@RequestBody Payload payload){
-        logger.info("POST request received at /log");
+    public Payload logPayload(@RequestBody Payload payload){  // This is for the POST endpoint "/log"
+        logger.info("POST request received at /log\n");
         return payloadService.logService(payload);
     }
 }

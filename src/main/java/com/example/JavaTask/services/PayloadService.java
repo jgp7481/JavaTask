@@ -24,7 +24,7 @@ public class PayloadService {
     @Value("${BATCH_SIZE}")
     private int batchSize;
     @Value("${BATCH_INTERVAL}")
-    private int batchInterval;
+    private long batchInterval;
     @Value("${POST_ENDPOINT}")
     private String postEndpointUrl;
 
@@ -34,18 +34,22 @@ public class PayloadService {
     private ScheduledFuture<?> scheduledTask;
 
     private static void forwardBatch(List<Payload> payloads, String url){
+
+        // This function executes the forwarding of the payload batch to the post endpoint mentioned in the environment variable
+
         RestTemplate restTemplate = new RestTemplate();
         HttpHeaders httpHeaders = new HttpHeaders();
         httpHeaders.setContentType(MediaType.APPLICATION_JSON);
         HttpEntity<List<Payload>> requestEntity = new HttpEntity<>(payloads,httpHeaders);
 
+         // This loop will try forwarding the batch upto 3 times.
         for(int i = 0; i < 3; i++) {
             try {
                 long startReq = System.nanoTime();
                 ResponseEntity<? extends List> response = restTemplate.exchange(url, HttpMethod.POST, requestEntity, payloads.getClass());
                 long endReq = System.nanoTime();
 
-                logger.info("Forwarded a batch of size: " + payloads.size() + " || Result status of the request: " + response.getStatusCode() + " || Duration of the post request in milliseconds: " + ((endReq - startReq) / 1000000));
+                logger.info("Forwarded a batch of size: " + payloads.size() + " || Result status of the request: " + response.getStatusCode() + " || Duration of the post request in milliseconds: " + ((endReq - startReq) / 1000000)+"\n");
                 payloads.clear();
                 break;
             }
@@ -57,21 +61,17 @@ public class PayloadService {
             }
 
             if(i < 2){
-                logger.error("Post request failed "+(i+1)+" time(s)...!! Trying again in 2 seconds...");
+                logger.error("Post request failed "+(i+1)+" time(s)...!! Trying again in 2 seconds...\n");
                 try {
                     Thread.sleep(2000);
                 } catch (InterruptedException e) {
-                    logger.error("InterruptedException Occurred..!!");
+                    logger.error("InterruptedException Occurred..!!\n");
                 }
             }
             else{
-                logger.error("Post request attempt failed 3 times..!! Could not forward Payload batch to post endpoint.");
+                logger.error("Post request attempt failed 3 times..!! Could not forward Payload batch to post endpoint.\n");
             }
         }
-
-        System.out.println("Length of the list : "+ payloads.size());
-        System.out.println("\n\n"+payloads);
-//        System.out.println("\n\nList of payloads at the receiver : "+response);
 
     }
 
@@ -79,19 +79,18 @@ public class PayloadService {
 
         payloads.add(payload);
 
-        logger.info("Payload received..!!");
+        logger.info("Payload received..!!\n");
 
-        if(payloads.size() == 1){
+        if(payloads.size() == 1){   // If a new batch is being created then forwarding is scheduled after batch interval
             taskScheduler = Executors.newScheduledThreadPool(1);
             Runnable forward = ()->forwardBatch(payloads,postEndpointUrl);
             scheduledTask = taskScheduler.schedule(forward, batchInterval, TimeUnit.MILLISECONDS);
-            System.out.println("Forwarding scheduled..!! Batch will be forwarded after 10 seconds...!!\n\n");
+            logger.info("First Payload in new batch is received. Batch Forwarding scheduled..!! Batch will be forwarded after "+(batchInterval/1000)+" seconds...!!\n");
         }
-        else if(payloads.size() >= batchSize) {
+        else if(payloads.size() >= batchSize) { // If batch size limit is reached then batch is immediately forwarded to post endpoint.
             if (scheduledTask != null && !scheduledTask.isDone()) {
                 scheduledTask.cancel(false);
-                System.out.println("Batch size limit reached...!! forwarding batch immediately..\n\n");
-                logger.info("Batch size limit reached...!! forwarding batch immediately..!!");
+                logger.info("Batch size limit reached...!! forwarding batch immediately..!!\n");
             }
             forwardBatch(payloads, postEndpointUrl);
         }
