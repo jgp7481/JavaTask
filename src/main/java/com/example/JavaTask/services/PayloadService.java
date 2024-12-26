@@ -1,6 +1,10 @@
 package com.example.JavaTask.services;
 
 import com.example.JavaTask.models.Payload;
+
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -13,7 +17,10 @@ import org.springframework.web.client.RestTemplate;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -29,9 +36,29 @@ public class PayloadService {
     private String postEndpointUrl;
 
     List<Payload> payloads = new ArrayList<>();
+    BlockingQueue<Payload> incomingPayloads = new LinkedBlockingQueue<>();
     private static Logger logger = LoggerFactory.getLogger(PayloadService.class);
-    private ScheduledExecutorService taskScheduler;
+    private ScheduledExecutorService scheduledExecutor;
+    private ExecutorService executor;
+    private final Object lock = new Object();
+    private boolean processing = false;
     private ScheduledFuture<?> scheduledTask;
+
+    @PostConstruct
+    public void init(){
+        scheduledExecutor = Executors.newSingleThreadScheduledExecutor();
+        executor = Executors.newSingleThreadExecutor();
+    }
+
+    @PreDestroy
+    public void cleanup(){
+        if(scheduledExecutor != null){
+            scheduledExecutor.shutdownNow();
+        }
+        if(executor != null){
+            executor.shutdownNow();
+        }
+    }
 
     private static void forwardBatch(List<Payload> payloads, String url){
 
@@ -75,24 +102,50 @@ public class PayloadService {
 
     }
 
+    private void processBatch(){
+        if(processing || incomingPayloads.isEmpty()){
+            return;
+        }
+        synchronized(lock){
+            processing = true;
+            try{
+                payloads = new ArrayList<>();
+                incomingPayloads.drainTo(payloads,batchSize);
+                if(!payloads.isEmpty()){
+                    forwardBatch(payloads, postEndpointUrl);
+                }
+            }
+            finally{
+                processing = false;
+                payloads.clear();
+            }
+        }
+    }
+
     public Payload logService(Payload payload){
 
-        payloads.add(payload);
+        try{
+            incomingPayloads.put(payload);
 
-        logger.info("Payload received..!!\n");
+            logger.info("Payload received..!!\n");
 
-        if(payloads.size() == 1){   // If a new batch is being created then forwarding is scheduled after batch interval
-            taskScheduler = Executors.newScheduledThreadPool(1);
-            Runnable forward = ()->forwardBatch(payloads,postEndpointUrl);
-            scheduledTask = taskScheduler.schedule(forward, batchInterval, TimeUnit.MILLISECONDS);
-            logger.info("First Payload in new batch is received. Batch Forwarding scheduled..!! Batch will be forwarded after "+(batchInterval/1000)+" seconds...!!\n");
-        }
-        else if(payloads.size() >= batchSize) { // If batch size limit is reached then batch is immediately forwarded to post endpoint.
-            if (scheduledTask != null && !scheduledTask.isDone()) {
-                scheduledTask.cancel(false);
-                logger.info("Batch size limit reached...!! forwarding batch immediately..!!\n");
+            if(incomingPayloads.size() == 1){   // If a new batch is being created then forwarding is scheduled after batch interval
+                synchronized(lock){
+                    scheduledTask = scheduledExecutor.schedule(()->processBatch(),batchInterval,TimeUnit.MILLISECONDS);
+                    logger.info("First Payload in new batch is received. Batch Forwarding scheduled..!! Batch will be forwarded after "+(batchInterval/1000)+" seconds...!!\n");
+                }
             }
-            forwardBatch(payloads, postEndpointUrl);
+            else if(incomingPayloads.size() >= batchSize) { // If batch size limit is reached then batch is immediately forwarded to post endpoint.
+                synchronized(lock){
+                    if (scheduledTask != null && !scheduledTask.isDone()) {
+                    scheduledTask.cancel(true);
+                    logger.info("Batch size limit reached...!! forwarding batch immediately..!!\n");
+                    }
+                    executor.submit(()->processBatch());
+                }
+            }
+        } catch(Exception e){
+            logger.error("Error occured : "+e.getMessage());
         }
 
         return payload;
