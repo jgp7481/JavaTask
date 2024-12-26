@@ -16,6 +16,7 @@ This application is a simple webhook receiver with two main endpoints. It collec
   - The payloads are stored until either the **batch size** limit is reached or the **batch interval** time has elapsed.
   - Once one of these conditions is met, the collected payloads are forwarded to the configured **post endpoint**.
   - The stored data is then cleared after sending the batch.
+  - If failed to forward payloads to configured endpoint, then application retries this upto 3 times with interval of 2 seconds. If failed 3 times then logs the error.
 
 ## Environment Variables
 
